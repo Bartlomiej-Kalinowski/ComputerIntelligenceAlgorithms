@@ -4,8 +4,10 @@ import random
 import math
 from random import randint
 
+DIMENSIONS=3
 N_ITER = 10000
 N_RUNS = 100
+
 
 def draw(raw_data: list[str], objective_val, output_file: str = "average_local_search_progress.png"):
     runs = []
@@ -37,7 +39,7 @@ def draw(raw_data: list[str], objective_val, output_file: str = "average_local_s
 
 
 class GeneticAlgorithm:
-    def __init__(self, dimensions=10, bits_per_dimension=16,
+    def __init__(self, dimensions=DIMENSIONS, bits_per_dimension=16,
                  lower_bound=-3, upper_bound=3, start_pop_size = 100, representation="real"):
         self.dimensions = dimensions
         self.bits_per_dimension = bits_per_dimension
@@ -45,6 +47,9 @@ class GeneticAlgorithm:
         self.upper_bound = upper_bound
         self.representation = representation
         self.start_pop_size = start_pop_size
+        self.beta_theta = math.radians(5.0)
+        self.theta_pairs = [(i, j) for i in range(self.dimensions - 1) for j in range(i + 1, self.dimensions)]
+        self.theta_count = len(self.theta_pairs)
         if self.representation not in {"gray", "real"}:
             raise ValueError("representation must be 'gray' or 'real'")
 
@@ -62,7 +67,8 @@ class GeneticAlgorithm:
         bits =  [random.randint(0, 1) for _ in range(self.dimensions * self.bits_per_dimension)]
         x = self.decode_solution(bits)
         sigma = [self.initial_sigma() for _ in range(self.dimensions)]
-        return {"x": x, "sigma": sigma}
+        theta = [0.0 for _ in range(self.theta_count)]
+        return {"x": x, "sigma": sigma, "theta": theta}
 
     def initial_sigma(self):
         return (self.upper_bound - self.lower_bound) / 6
@@ -125,7 +131,90 @@ class GeneticAlgorithm:
         return selected
 
     def clone_individual(self, individual):
-        return {"x": individual["x"].copy(), "sigma": individual["sigma"].copy()}
+        cloned = {"x": individual["x"].copy(), "sigma": individual["sigma"].copy()}
+        if "theta" in individual:
+            cloned["theta"] = individual["theta"].copy()
+        return cloned
+
+    @staticmethod
+    def _wrap_angle(angle):
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
+        return angle
+
+    def _build_rotation_matrix(self, theta_values):
+        if len(theta_values) != self.theta_count:
+            raise ValueError("theta vector length does not match dimensions")
+        matrix = [
+            [1.0 if row == col else 0.0 for col in range(self.dimensions)]
+            for row in range(self.dimensions)
+        ]
+        for angle, (i, j) in zip(theta_values, self.theta_pairs):
+            cosine = math.cos(angle)
+            sine = math.sin(angle)
+            row_i = matrix[i][:]
+            row_j = matrix[j][:]
+            for col in range(self.dimensions):
+                matrix[i][col] = cosine * row_i[col] - sine * row_j[col]
+                matrix[j][col] = sine * row_i[col] + cosine * row_j[col]
+        return matrix
+
+    def _apply_matrix_to_vector(self, matrix, vector):
+        return [
+            sum(matrix[row][col] * vector[col] for col in range(self.dimensions))
+            for row in range(self.dimensions)
+        ]
+
+    def _mutate_real_with_rotations(self, individual):
+        tau_prime = 1 / math.sqrt(2 * self.dimensions)
+        tau = 1 / math.sqrt(2 * math.sqrt(self.dimensions))
+        min_sigma = 1e-8
+        max_sigma = self.upper_bound - self.lower_bound
+
+        global_noise = random.gauss(0, 1)
+        sigma_prime = []
+        for sigma_i in individual["sigma"]:
+            local_noise = random.gauss(0, 1)
+            sigma_new = sigma_i * math.exp(tau_prime * global_noise + tau * local_noise)
+            if sigma_new < min_sigma:
+                sigma_new = min_sigma
+            if sigma_new > max_sigma:
+                sigma_new = max_sigma
+            sigma_prime.append(sigma_new)
+
+        previous_theta = individual.get("theta", [0.0 for _ in range(self.theta_count)])
+        theta_prime = []
+        for theta_j in previous_theta:
+            theta_new = self._wrap_angle(theta_j + self.beta_theta * random.gauss(0, 1))
+            theta_prime.append(theta_new)
+
+        rotation_matrix = self._build_rotation_matrix(theta_prime)
+        sigma_correlated = self._apply_matrix_to_vector(rotation_matrix, sigma_prime)
+        gaussian_step = [random.gauss(0, 1) for _ in range(self.dimensions)]
+
+        x_next = []
+        for i in range(self.dimensions):
+            x_i = individual["x"][i] + gaussian_step[i] * sigma_correlated[i]
+            if x_i < self.lower_bound:
+                x_i = self.lower_bound
+            if x_i > self.upper_bound:
+                x_i = self.upper_bound
+            x_next.append(x_i)
+
+        individual["x"] = x_next
+        individual["sigma"] = sigma_prime
+        individual["theta"] = theta_prime
+
+    def print_rotation_matrix_example_10d(self):
+        if self.representation != "real" or self.dimensions != 10:
+            return
+        theta_example = [self._wrap_angle(self.beta_theta * random.gauss(0, 1)) for _ in range(self.theta_count)]
+        rotation_matrix = self._build_rotation_matrix(theta_example)
+        print("Przykladowa macierz R(theta) dla 10 wymiarow:")
+        for row in rotation_matrix:
+            print(" ".join(f"{value: .5f}" for value in row))
 
     def crossover(self, p1, p2, r_cross=0.9):
         c1 = self.clone_individual(p1)
@@ -151,85 +240,42 @@ class GeneticAlgorithm:
         weights = [math.log(parent_count + 1) - math.log(j) for j in range(1, parent_count + 1)]
         weight_sum = sum(weights)
         normalized_weights = [weight / weight_sum for weight in weights]
-        mu_eff = 1.0 / sum(weight * weight for weight in normalized_weights)
-
-        # Global and local learning rates for sigma self-adaptation in ES.
-        new_learning_rate = 1 / math.sqrt(2 * mu_eff * self.dimensions)
-        old_learning_rate = 1 / math.sqrt(2 * math.sqrt(mu_eff * self.dimensions))
-
-        min_sigma = 1e-8
-        max_sigma = self.upper_bound - self.lower_bound
-        global_noise = random.gauss(0, 1)
 
         child_x = []
         child_sigma = []
         for i in range(self.dimensions):
-            sigma_weighted = (
-                sum(weights[j] * ranked_parents[j]["sigma"][i] for j in range(parent_count))
-                / weight_sum
+            child_sigma.append(
+                sum(normalized_weights[j] * ranked_parents[j]["sigma"][i] for j in range(parent_count))
             )
-            local_sigma_noise = random.gauss(0, 1)
-            sigma_i = sigma_weighted * math.exp(
-                new_learning_rate * global_noise + old_learning_rate * local_sigma_noise
+            child_x.append(
+                sum(normalized_weights[j] * ranked_parents[j]["x"][i] for j in range(parent_count))
             )
-            if sigma_i < min_sigma:
-                sigma_i = min_sigma
-            if sigma_i > max_sigma:
-                sigma_i = max_sigma
 
-            x_weighted = (
-                sum(weights[j] * ranked_parents[j]["x"][i] for j in range(parent_count))
-                / weight_sum
+        child_theta = []
+        for theta_index in range(self.theta_count):
+            weighted_sin = sum(
+                normalized_weights[j] * math.sin(ranked_parents[j].get("theta", [0.0] * self.theta_count)[theta_index])
+                for j in range(parent_count)
             )
-            x_i = x_weighted + sigma_i * random.gauss(0, 1)
-            if x_i < self.lower_bound:
-                x_i = self.lower_bound
-            if x_i > self.upper_bound:
-                x_i = self.upper_bound
+            weighted_cos = sum(
+                normalized_weights[j] * math.cos(ranked_parents[j].get("theta", [0.0] * self.theta_count)[theta_index])
+                for j in range(parent_count)
+            )
+            child_theta.append(math.atan2(weighted_sin, weighted_cos))
 
-            child_sigma.append(sigma_i)
-            child_x.append(x_i)
-
-        return {"x": child_x, "sigma": child_sigma}
+        child = {"x": child_x, "sigma": child_sigma, "theta": child_theta}
+        self._mutate_real_with_rotations(child)
+        return child
 
     def mutation(self, individual, r_mut):
-        tau = 1 / (self.dimensions ** 0.5)
-        min_sigma = 1e-8
-        max_sigma = self.upper_bound - self.lower_bound
         if self.representation == "gray":
-            x_values = self.decode_solution(individual["x"])
-            changed = False
-            for i in range(self.dimensions):
-                if random.random() < r_mut:
-                    changed = True
-                    individual["sigma"][i] = individual["sigma"][i] * math.exp(tau * random.gauss(0, 1))
-                    if individual["sigma"][i] < min_sigma:
-                        individual["sigma"][i] = min_sigma
-                    if individual["sigma"][i] > max_sigma:
-                        individual["sigma"][i] = max_sigma
-
-                    x_values[i] += random.gauss(0, individual["sigma"][i])
-                    if x_values[i] < self.lower_bound:
-                        x_values[i] = self.lower_bound
-                    if x_values[i] > self.upper_bound:
-                        x_values[i] = self.upper_bound
-            if changed:
-                individual["x"] = self.encode_solution(x_values)
+            mutation_mask = [1 if random.random() < r_mut else 0 for _ in individual["x"]]
+            if any(mutation_mask):
+                individual["x"] = [bit ^ mask_bit for bit, mask_bit in zip(individual["x"], mutation_mask)]
             return
 
-        for i in range(self.dimensions):
-            if random.random() < r_mut:
-                individual["sigma"][i] = individual["sigma"][i] * math.exp(tau * random.gauss(0, 1))
-                if individual["sigma"][i] < min_sigma:
-                    individual["sigma"][i] = min_sigma
-                if individual["sigma"][i] > max_sigma:
-                    individual["sigma"][i] = max_sigma
-
-                individual["x"][i] += random.gauss(0, individual["sigma"][i])
-                if individual["x"][i] < self.lower_bound:
-                    individual["x"][i] = self.lower_bound
-                if individual["x"][i] > self.upper_bound:
-                    individual["x"][i] = self.upper_bound
+        if random.random() < r_mut:
+            self._mutate_real_with_rotations(individual)
 
     def run(self, n_iter=100, r_cross=0.9, r_mut=None, verbose=False, print_every=10):
         population = self.make_random_population()
@@ -293,6 +339,8 @@ class GeneticAlgorithm:
             f"reprezentacja={self.representation}, wymiary={self.dimensions}, "
             f"bity_na_wymiar={self.bits_per_dimension}, populacja={self.start_pop_size}"
         )
+        if self.representation == "real" and self.dimensions == 10:
+            self.print_rotation_matrix_example_10d()
         sample_bits = self.make_individual_gray()["x"]
         sample_decoded = self.decode_solution(sample_bits)
         sample_encoded = self.encode_solution(sample_decoded)
@@ -310,6 +358,12 @@ class GeneticAlgorithm:
         sigma_preview = [round(value, 6) for value in result["best_sigma"][:min(5, len(result["best_sigma"]))]]
         print(f"najlepszy wektor x (pierwsze {len(preview)}): {preview}")
         print(f"najlepszy wektor sigma (pierwsze {len(sigma_preview)}): {sigma_preview}")
+        if self.representation == "real":
+            theta_preview = [
+                round(value, 6)
+                for value in result["best_individual"].get("theta", [])[:min(5, len(result["best_individual"].get("theta", [])))]
+            ]
+            print(f"najlepszy wektor theta (pierwsze {len(theta_preview)}): {theta_preview}")
         return result
 
 def test_current_implementation():

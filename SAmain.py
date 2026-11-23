@@ -4,7 +4,6 @@ import math
 import random
 import matplotlib.pyplot as plt
 
-
 def function_1(x):
     suma = 0
     for value in x:

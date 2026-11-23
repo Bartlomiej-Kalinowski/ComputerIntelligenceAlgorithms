@@ -10,12 +10,12 @@ from openpyxl.chart import LineChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-from AlgorytmEwolucyjny import GeneticAlgorithm
+from EvolutionaryAlgorithm import GeneticAlgorithm
 
-NUMBER_OF_RUNS = 100
+NUMBER_OF_RUNS = 100 # powinno byc 1000
 FUNCTION_CALLS = 10000
 POPULATION_SIZE = 100
-DIMENSIONS = 10
+DIMENSIONS = 3
 BITS_PER_DIMENSION = 16
 OUTPUT_EXCEL = "Wyniki_AlgorytmEwolucyjny.xlsx"
 

@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "ecdf_data.json"
-OUTPUT = ROOT / "outputs" / "ecdf_ae_20261118" / "ECDF_AlgorytmEwolucyjny.xlsx"
+OUTPUT = ROOT / "outputs" / "ecdf_ae_20261123" / "ECDF_AlgorytmEwolucyjny.xlsx"
 
 
 def populate(workbook, name, headings, values, percent=False, scientific=False):
