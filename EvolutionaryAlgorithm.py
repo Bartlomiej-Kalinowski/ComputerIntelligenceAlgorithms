@@ -269,9 +269,27 @@ class GeneticAlgorithm:
 
     def mutation(self, individual, r_mut):
         if self.representation == "gray":
-            mutation_mask = [1 if random.random() < r_mut else 0 for _ in individual["x"]]
-            if any(mutation_mask):
-                individual["x"] = [bit ^ mask_bit for bit, mask_bit in zip(individual["x"], mutation_mask)]
+            tau = 1 / (self.dimensions ** 0.5)
+            min_sigma = 1e-8
+            max_sigma = self.upper_bound - self.lower_bound
+            x_values = self.decode_solution(individual["x"])
+            changed = False
+            for i in range(self.dimensions):
+                if random.random() < r_mut:
+                    changed = True
+                    individual["sigma"][i] = individual["sigma"][i] * math.exp(tau * random.gauss(0, 1))
+                    if individual["sigma"][i] < min_sigma:
+                        individual["sigma"][i] = min_sigma
+                    if individual["sigma"][i] > max_sigma:
+                        individual["sigma"][i] = max_sigma
+
+                    x_values[i] += random.gauss(0, individual["sigma"][i])
+                    if x_values[i] < self.lower_bound:
+                        x_values[i] = self.lower_bound
+                    if x_values[i] > self.upper_bound:
+                        x_values[i] = self.upper_bound
+            if changed:
+                individual["x"] = self.encode_solution(x_values)
             return
 
         if random.random() < r_mut:
