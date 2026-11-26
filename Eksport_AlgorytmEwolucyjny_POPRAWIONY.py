@@ -12,15 +12,15 @@ from openpyxl.utils import get_column_letter
 
 from EvolutionaryAlgorithm import GeneticAlgorithm
 
-NUMBER_OF_RUNS = 100 # powinno byc 1000
-FUNCTION_CALLS = 10000
-POPULATION_SIZE = 100
-DIMENSIONS = 3
+DIMENSIONS = 30
+NUMBER_OF_RUNS = 100
+FUNCTION_CALLS = 10000 * DIMENSIONS
+POPULATION_SIZE = 15
 BITS_PER_DIMENSION = 16
 OUTPUT_EXCEL = "Wyniki_AlgorytmEwolucyjny.xlsx"
 
 
-# Funkcje podane w PDF (minimalizacja, n=10).
+# Funkcje podane w PDF
 def function_1(x):
     s = sum(v * v for v in x)
     t = math.exp(-5.0 / (1.0 + s))
